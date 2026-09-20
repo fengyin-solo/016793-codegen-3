@@ -9,11 +9,13 @@ import {
   Settings,
   AlertCircle,
   Play,
+  Square,
+  Loader,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
+import { usePlayerStore, TEST_SPEAK_ID } from '@/store/usePlayerStore';
 import { Select, Slider, Toggle, Button } from '@/components/ui';
 import { LANGUAGES } from '@/utils/constants';
-import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 
 export const ControlPanel: React.FC = () => {
   const sourceLang = useAppStore(state => state.sourceLang);
@@ -25,7 +27,19 @@ export const ControlPanel: React.FC = () => {
   const toggleMic = useAppStore(state => state.toggleMic);
   const setAudioSettings = useAppStore(state => state.setAudioSettings);
 
-  const { testSpeak, isSupported: ttsSupported } = useSpeechSynthesis();
+  const { testSpeak: playTest, isSupported: ttsSupportedRaw } = usePlayerStore();
+  const playingId = usePlayerStore(state => state.playingId);
+  const isSpeaking = usePlayerStore(state => state.isSpeaking);
+  const isTestPlaying = playingId === TEST_SPEAK_ID;
+  const ttsSupported = ttsSupportedRaw();
+
+  const handleTestSpeak = () => {
+    const currentTargetLang = useAppStore.getState().targetLang;
+    const testText = currentTargetLang.startsWith('zh')
+      ? '语音播报测试成功'
+      : 'Voice broadcast test successful';
+    playTest(testText, currentTargetLang);
+  };
 
   const languageOptions = LANGUAGES.map(lang => ({
     value: lang.code,
@@ -169,12 +183,18 @@ export const ControlPanel: React.FC = () => {
         <Button
           variant="secondary"
           size="sm"
-          onClick={testSpeak}
+          onClick={handleTestSpeak}
           disabled={!ttsSupported}
-          icon={<Play className="w-4 h-4" />}
+          icon={
+            isTestPlaying ? (
+              isSpeaking ? <Square className="w-4 h-4" /> : <Loader className="w-4 h-4 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )
+          }
           className="w-full"
         >
-          测试播报
+          {isTestPlaying ? (isSpeaking ? '停止测试播报' : '播报启动中...') : '测试播报'}
         </Button>
         
         {!ttsSupported && (

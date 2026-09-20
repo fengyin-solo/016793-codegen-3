@@ -64,7 +64,7 @@ export const SubtitleDisplay: React.FC = () => {
                       {currentSubtitle}
                     </p>
                     <p className="text-dark-500 text-sm mt-2 italic">
-                      正在识别...
+                      正在识别...（识别完成后将显示置信度与本段语音时长，可逐条重听）
                     </p>
                   </div>
                 </div>

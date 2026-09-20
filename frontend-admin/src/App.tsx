@@ -7,6 +7,7 @@ import { SessionHistoryCenter } from '@/components/SessionHistoryCenter';
 import { ToastContainer } from '@/components/ui';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { useAppStore } from '@/store/useAppStore';
+import { usePlayerStore } from '@/store/usePlayerStore';
 
 const App: React.FC = () => {
   const [showHistory, setShowHistory] = useState(false);
@@ -14,6 +15,12 @@ const App: React.FC = () => {
 
   // 初始化语音识别（内部已集成TTS播报）
   useSpeechRecognition();
+
+  const handleCloseHistory = () => {
+    // 关闭会话记录面板时停止在其中发起的播报，避免界面消失后声音继续
+    usePlayerStore.getState().stop();
+    setShowHistory(false);
+  };
 
   return (
     <div className="min-h-screen h-screen w-full flex flex-col p-4 md:p-6 box-border">
@@ -74,7 +81,7 @@ const App: React.FC = () => {
 
       {/* 会话记录中心 */}
       {showHistory && (
-        <SessionHistoryCenter onClose={() => setShowHistory(false)} />
+        <SessionHistoryCenter onClose={handleCloseHistory} />
       )}
     </div>
   );

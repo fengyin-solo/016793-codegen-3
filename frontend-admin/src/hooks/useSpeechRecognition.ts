@@ -1,36 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-
-// TTS 播报函数
-const speakText = (text: string, lang: string) => {
-  if (typeof window === 'undefined' || !window.speechSynthesis) {
-    return;
-  }
-  
-  const settings = useAppStore.getState().audioSettings;
-  if (!settings.ttsEnabled) {
-    return;
-  }
-  
-  // 取消之前的播报
-  window.speechSynthesis.cancel();
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  
-  // 获取合适的语音
-  const voices = window.speechSynthesis.getVoices();
-  const voice = voices.find(v => v.lang.startsWith(lang.split('-')[0])) || voices[0];
-  if (voice) {
-    utterance.voice = voice;
-    utterance.lang = voice.lang;
-  }
-  
-  utterance.volume = settings.volume / 100;
-  utterance.rate = settings.speed;
-  
-  console.log('[TTS] 即时播报:', text);
-  window.speechSynthesis.speak(utterance);
-};
+import { usePlayerStore } from '@/store/usePlayerStore';
+import type { SpeechMetadata } from '@/types';
 
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
@@ -215,10 +186,24 @@ export const useSpeechRecognition = () => {
   const shouldRestartRef = useRef(false);
   const speechDetectedRef = useRef(false);
   const resultReceivedRef = useRef(false);
-  
+  // 本段语音的起止时间，用于计算时长
+  const speechStartRef = useRef<number | null>(null);
+  const speechEndRef = useRef<number | null>(null);
+
   const isMicOn = useAppStore(state => state.isMicOn);
   const sourceLang = useAppStore(state => state.sourceLang);
   const targetLang = useAppStore(state => state.targetLang);
+
+  // 计算本段语音时长（毫秒），未采集到时返回 undefined
+  const takeSpeechDuration = (): number | undefined => {
+    const start = speechStartRef.current;
+    const end = speechEndRef.current ?? (start !== null ? Date.now() : null);
+    speechStartRef.current = null;
+    speechEndRef.current = null;
+    if (start === null || end === null) return undefined;
+    const duration = end - start;
+    return duration > 100 ? duration : undefined;
+  };
 
   useEffect(() => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -238,6 +223,8 @@ export const useSpeechRecognition = () => {
       shouldRestartRef.current = true;
       speechDetectedRef.current = false;
       resultReceivedRef.current = false;
+      speechStartRef.current = null;
+      speechEndRef.current = null;
 
       // 关键配置
       recognition.continuous = false;  // 改为 false，每次说完一句就停止
@@ -263,10 +250,19 @@ export const useSpeechRecognition = () => {
       recognition.onspeechstart = () => {
         console.log('[语音识别] 🗣️ 检测到语音');
         speechDetectedRef.current = true;
+        // 记录本段语音开始时间
+        if (speechStartRef.current === null) {
+          speechStartRef.current = Date.now();
+        }
+        speechEndRef.current = null;
       };
 
       recognition.onspeechend = () => {
         console.log('[语音识别] 🗣️ 语音结束');
+        // 记录本段语音结束时间（若事件缺失，会在拿到最终结果时补算）
+        if (speechStartRef.current !== null && speechEndRef.current === null) {
+          speechEndRef.current = Date.now();
+        }
       };
 
       recognition.onnomatch = () => {
@@ -281,14 +277,25 @@ export const useSpeechRecognition = () => {
         const currentSourceLang = store.sourceLang;
         let interim = '';
         let final = '';
+        // 按文本长度加权汇总最终结果的置信度（0 或缺失视为未带出）
+        let confidenceWeightedSum = 0;
+        let confidenceWeightTotal = 0;
+        let confidenceAvailable = false;
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
-          const text = result[0].transcript;
-          console.log(`[语音识别] [${i}] "${text}" isFinal=${result.isFinal}`);
-          
+          const alternative = result[0];
+          const text = alternative.transcript;
+          console.log(`[语音识别] [${i}] "${text}" isFinal=${result.isFinal} confidence=${alternative.confidence}`);
+
           if (result.isFinal) {
             final += text;
+            if (alternative.confidence > 0) {
+              const weight = Math.max(text.trim().length, 1);
+              confidenceWeightedSum += alternative.confidence * weight;
+              confidenceWeightTotal += weight;
+              confidenceAvailable = true;
+            }
           } else {
             interim += text;
           }
@@ -306,16 +313,29 @@ export const useSpeechRecognition = () => {
             console.log('[语音识别] 期望语言:', currentSourceLang);
             store.setCurrentSubtitle('');
             store.addToast('warning', '请使用设置的源语言说话');
+            // 丢弃本段计时，避免与下一句混淆
+            speechStartRef.current = null;
+            speechEndRef.current = null;
             return;
           }
-          
+
           console.log('[语音识别] ✅ 最终:', final);
           store.setCurrentSubtitle('');
           const translated = translateText(final, currentSourceLang, store.targetLang);
-          store.addSubtitle(final, translated);
-          
-          // 立即播报翻译结果
-          speakText(translated, store.targetLang);
+
+          // 汇总本段语音的置信度与时长（未带出时保持 undefined，UI 会给出明确提示）
+          const metadata: SpeechMetadata = {
+            confidence: confidenceAvailable ? confidenceWeightedSum / confidenceWeightTotal : undefined,
+            durationMs: takeSpeechDuration(),
+          };
+          const newSubtitleId = store.addSubtitle(final, translated, metadata);
+
+          // 立即播报翻译结果（走统一播报状态，指示器/高亮随之同步）
+          usePlayerStore.getState().autoPlaySubtitle({
+            id: newSubtitleId,
+            translatedText: translated,
+            targetLang: store.targetLang,
+          });
         }
       };
 
@@ -347,6 +367,8 @@ export const useSpeechRecognition = () => {
         // 重置状态
         speechDetectedRef.current = false;
         resultReceivedRef.current = false;
+        speechStartRef.current = null;
+        speechEndRef.current = null;
         
         // 自动重启
         if (shouldRestartRef.current && useAppStore.getState().isMicOn) {

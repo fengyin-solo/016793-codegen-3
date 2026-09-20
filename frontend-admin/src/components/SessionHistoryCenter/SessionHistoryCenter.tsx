@@ -12,20 +12,34 @@ import {
   Calendar,
   ChevronDown,
   AlertTriangle,
+  Volume2,
+  Square,
+  Loader,
+  BadgeCheck,
+  Timer,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { Button } from '@/components/ui';
+import { usePlayerStore } from '@/store/usePlayerStore';
+import { Button, ConfidenceDuration } from '@/components/ui';
 import { LANGUAGES } from '@/utils/constants';
 import { formatTime, getLanguageDisplayName, truncateText } from '@/utils/helpers';
 import type { SessionRecord, SessionRecordType } from '@/types';
 
 type FilterType = 'all' | SessionRecordType;
 
+// 与 SubtitleItem 保持一致的语言推断
+const inferLangFromText = (text: string): string =>
+  /[一-龥]/.test(text) ? 'zh-CN' : 'en-US';
+
 export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const sessionRecords = useAppStore(state => state.sessionRecords);
   const deleteSessionRecord = useAppStore(state => state.deleteSessionRecord);
   const clearSessionRecords = useAppStore(state => state.clearSessionRecords);
   const addToast = useAppStore(state => state.addToast);
+  const playingId = usePlayerStore(state => state.playingId);
+  const isSpeaking = usePlayerStore(state => state.isSpeaking);
+  const replaySubtitle = usePlayerStore(state => state.replaySubtitle);
+  const stopSpeakingPlayback = usePlayerStore(state => state.stop);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
@@ -74,6 +88,9 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (playingId === id) {
+      stopSpeakingPlayback();
+    }
     deleteSessionRecord(id);
     if (selectedRecord?.id === id) {
       setSelectedRecord(null);
@@ -81,6 +98,7 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
   };
 
   const handleClearAll = () => {
+    stopSpeakingPlayback();
     clearSessionRecords();
     setShowClearConfirm(false);
     setSelectedRecord(null);
@@ -99,9 +117,22 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
   };
 
   const getTypeColor = (type: SessionRecordType) => {
-    return type === 'voice' 
-      ? 'bg-accent-red/20 text-accent-red' 
+    return type === 'voice'
+      ? 'bg-accent-red/20 text-accent-red'
       : 'bg-primary-500/20 text-primary-400';
+  };
+
+  // 重听某条记录的译文（语音识别记录）；重复触发会互相打断
+  const handleReplay = (record: SessionRecord) => {
+    if (playingId === record.id) {
+      stopSpeakingPlayback();
+      return;
+    }
+    replaySubtitle({
+      id: record.id,
+      translatedText: record.targetText,
+      targetLang: inferLangFromText(record.targetText),
+    });
   };
 
   const filterOptions: { value: FilterType; label: string }[] = [
@@ -109,6 +140,55 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
     { value: 'voice', label: '语音识别' },
     { value: 'manual', label: '手动翻译' },
   ];
+
+  // 详情中的识别信息块：置信度、时长与重听（语音记录）；手动翻译显示“不适用”
+  const renderRecognitionInfo = (record: SessionRecord) => {
+    const isPlaying = playingId === record.id;
+    return (
+      <div className="glass-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-dark-400">识别信息</span>
+          {record.type === 'voice' && (
+            <button
+              onClick={() => handleReplay(record)}
+              className={`
+                inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                transition-all duration-200 border
+                ${isPlaying
+                  ? 'bg-accent-red/20 text-accent-red border-accent-red/40 hover:bg-accent-red/30'
+                  : 'bg-primary-500/10 text-primary-400 border-primary-500/30 hover:bg-primary-500/20'}
+              `}
+            >
+              {isPlaying ? (
+                isSpeaking ? (
+                  <>
+                    <Square className="w-3.5 h-3.5" />
+                    停止播报
+                  </>
+                ) : (
+                  <>
+                    <Loader className="w-3.5 h-3.5 animate-spin" />
+                    启动中...
+                  </>
+                )
+              ) : (
+                <>
+                  <Volume2 className="w-3.5 h-3.5" />
+                  重听译文
+                </>
+              )}
+            </button>
+          )}
+        </div>
+        <ConfidenceDuration
+          confidence={record.metadata?.confidence}
+          durationMs={record.metadata?.durationMs}
+          notApplicable={record.type === 'manual'}
+          size="md"
+        />
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6">
@@ -262,17 +342,59 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                               <p className="text-sm text-dark-300 truncate mb-1">
                                 {truncateText(record.sourceText, 60)}
                               </p>
-                              <p className="text-sm text-dark-100 truncate">
+                              <p className="text-sm text-dark-100 truncate mb-2">
                                 {truncateText(record.targetText, 60)}
                               </p>
+                              {/* 置信度与时长（与字幕内容保持一致；手动翻译显示“不适用”） */}
+                              {record.type === 'voice' ? (
+                                <ConfidenceDuration
+                                  confidence={record.metadata?.confidence}
+                                  durationMs={record.metadata?.durationMs}
+                                />
+                              ) : (
+                                <div className="flex items-center gap-3 text-xs text-dark-600">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <BadgeCheck className="w-3.5 h-3.5" />
+                                    置信度：不适用
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Timer className="w-3.5 h-3.5" />
+                                    时长：不适用
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                            <button
-                              onClick={(e) => handleDelete(record.id, e)}
-                              className="p-2 opacity-0 group-hover:opacity-100 hover:bg-accent-red/20 text-dark-500 hover:text-accent-red rounded-lg transition-all"
-                              title="删除记录"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex flex-col items-end gap-1">
+                              {record.type === 'voice' && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReplay(record);
+                                  }}
+                                  className={`p-2 rounded-lg transition-all ${
+                                    playingId === record.id
+                                      ? 'bg-accent-green/20 text-accent-green'
+                                      : 'opacity-0 group-hover:opacity-100 hover:bg-primary-500/20 text-dark-500 hover:text-primary-400'
+                                  }`}
+                                  title={playingId === record.id ? '停止播报' : '重听译文'}
+                                >
+                                  {playingId === record.id && !isSpeaking ? (
+                                    <Loader className="w-4 h-4 animate-spin" />
+                                  ) : playingId === record.id ? (
+                                    <Square className="w-4 h-4" />
+                                  ) : (
+                                    <Volume2 className="w-4 h-4" />
+                                  )}
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => handleDelete(record.id, e)}
+                                className="p-2 opacity-0 group-hover:opacity-100 hover:bg-accent-red/20 text-dark-500 hover:text-accent-red rounded-lg transition-all"
+                                title="删除记录"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -324,6 +446,9 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                   </p>
                 </div>
 
+                {/* 识别信息：置信度、时长与重听 */}
+                {renderRecognitionInfo(selectedRecord)}
+
                 {/* 原文 */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -374,10 +499,7 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                 <div className="pt-4 border-t border-white/10">
                   <Button
                     variant="danger"
-                    onClick={() => {
-                      deleteSessionRecord(selectedRecord.id);
-                      setSelectedRecord(null);
-                    }}
+                    onClick={(e) => handleDelete(selectedRecord.id, e)}
                     icon={<Trash2 className="w-4 h-4" />}
                     className="w-full"
                   >
@@ -429,6 +551,9 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                   {getLanguageDisplayName(selectedRecord.sourceLang, LANGUAGES)} → {getLanguageDisplayName(selectedRecord.targetLang, LANGUAGES)}
                 </p>
               </div>
+
+              {/* 识别信息：置信度、时长与重听 */}
+              {renderRecognitionInfo(selectedRecord)}
 
               {/* 原文 */}
               <div className="space-y-2">

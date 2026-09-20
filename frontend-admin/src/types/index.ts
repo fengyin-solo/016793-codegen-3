@@ -12,6 +12,10 @@ export interface SubtitleEntry {
   translatedText: string;
   timestamp: Date;
   isActive: boolean;
+  // 识别置信度（0~1），识别结果未带出时为 undefined
+  confidence?: number;
+  // 本段语音时长（毫秒），识别结果未带出时为 undefined
+  durationMs?: number;
 }
 
 // 翻译结果
@@ -53,6 +57,14 @@ export interface Toast {
 // 会话记录类型
 export type SessionRecordType = 'voice' | 'manual';
 
+// 语音识别的附加信息
+export interface SpeechMetadata {
+  // 识别置信度（0~1），结果未带出时为 undefined
+  confidence?: number;
+  // 本段语音时长（毫秒），结果未带出时为 undefined
+  durationMs?: number;
+}
+
 // 会话记录条目
 export interface SessionRecord {
   id: string;
@@ -62,10 +74,7 @@ export interface SessionRecord {
   sourceLang: string;
   targetLang: string;
   timestamp: Date;
-  metadata?: {
-    confidence?: number;
-    duration?: number;
-  };
+  metadata?: SpeechMetadata;
 }
 
 // 应用状态
@@ -97,7 +106,11 @@ export interface AppState {
   setTargetLang: (lang: string) => void;
   toggleMic: () => void;
   setAudioSettings: (settings: Partial<AudioSettings>) => void;
-  addSubtitle: (original: string, translated: string) => void;
+  addSubtitle: (
+    original: string,
+    translated: string,
+    metadata?: SpeechMetadata
+  ) => string;
   setCurrentSubtitle: (text: string) => void;
   setInputText: (text: string) => void;
   translate: () => Promise<void>;
