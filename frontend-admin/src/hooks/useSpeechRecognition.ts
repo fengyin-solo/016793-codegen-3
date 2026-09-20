@@ -1,36 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-
-// TTS 播报函数
-const speakText = (text: string, lang: string) => {
-  if (typeof window === 'undefined' || !window.speechSynthesis) {
-    return;
-  }
-  
-  const settings = useAppStore.getState().audioSettings;
-  if (!settings.ttsEnabled) {
-    return;
-  }
-  
-  // 取消之前的播报
-  window.speechSynthesis.cancel();
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  
-  // 获取合适的语音
-  const voices = window.speechSynthesis.getVoices();
-  const voice = voices.find(v => v.lang.startsWith(lang.split('-')[0])) || voices[0];
-  if (voice) {
-    utterance.voice = voice;
-    utterance.lang = voice.lang;
-  }
-  
-  utterance.volume = settings.volume / 100;
-  utterance.rate = settings.speed;
-  
-  console.log('[TTS] 即时播报:', text);
-  window.speechSynthesis.speak(utterance);
-};
+import { speechSynthesisService } from '@/services/speechSynthesis';
 
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
@@ -215,6 +185,7 @@ export const useSpeechRecognition = () => {
   const shouldRestartRef = useRef(false);
   const speechDetectedRef = useRef(false);
   const resultReceivedRef = useRef(false);
+  const speechStartedAtRef = useRef<number | null>(null);
   
   const isMicOn = useAppStore(state => state.isMicOn);
   const sourceLang = useAppStore(state => state.sourceLang);
@@ -238,6 +209,7 @@ export const useSpeechRecognition = () => {
       shouldRestartRef.current = true;
       speechDetectedRef.current = false;
       resultReceivedRef.current = false;
+      speechStartedAtRef.current = null;
 
       // 关键配置
       recognition.continuous = false;  // 改为 false，每次说完一句就停止
@@ -263,6 +235,9 @@ export const useSpeechRecognition = () => {
       recognition.onspeechstart = () => {
         console.log('[语音识别] 🗣️ 检测到语音');
         speechDetectedRef.current = true;
+        if (speechStartedAtRef.current === null) {
+          speechStartedAtRef.current = Date.now();
+        }
       };
 
       recognition.onspeechend = () => {
@@ -281,14 +256,23 @@ export const useSpeechRecognition = () => {
         const currentSourceLang = store.sourceLang;
         let interim = '';
         let final = '';
+        let confidenceTotal = 0;
+        let confidenceCount = 0;
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
-          const text = result[0].transcript;
-          console.log(`[语音识别] [${i}] "${text}" isFinal=${result.isFinal}`);
-          
+          const alternative = result[0];
+          const text = alternative.transcript;
+          console.log(
+            `[语音识别] [${i}] "${text}" isFinal=${result.isFinal} confidence=${alternative.confidence ?? '未提供'}`,
+          );
+
           if (result.isFinal) {
             final += text;
+            if (typeof alternative.confidence === 'number' && alternative.confidence >= 0) {
+              confidenceTotal += alternative.confidence;
+              confidenceCount += 1;
+            }
           } else {
             interim += text;
           }
@@ -306,16 +290,26 @@ export const useSpeechRecognition = () => {
             console.log('[语音识别] 期望语言:', currentSourceLang);
             store.setCurrentSubtitle('');
             store.addToast('warning', '请使用设置的源语言说话');
+            speechStartedAtRef.current = null;
             return;
           }
           
           console.log('[语音识别] ✅ 最终:', final);
+          const startedAt = speechStartedAtRef.current;
+          const durationMs = startedAt === null ? null : Date.now() - startedAt;
+          const confidence = confidenceCount > 0 ? confidenceTotal / confidenceCount : null;
+
           store.setCurrentSubtitle('');
           const translated = translateText(final, currentSourceLang, store.targetLang);
-          store.addSubtitle(final, translated);
-          
-          // 立即播报翻译结果
-          speakText(translated, store.targetLang);
+          const subtitleId = store.addSubtitle(final, translated, { confidence, durationMs });
+
+          // 立即播报翻译结果；新结果会抢占上一条播报。
+          speechSynthesisService.speak(translated, {
+            id: subtitleId,
+            lang: store.targetLang,
+            showInterruptedToast: true,
+          });
+          speechStartedAtRef.current = null;
         }
       };
 
@@ -347,6 +341,7 @@ export const useSpeechRecognition = () => {
         // 重置状态
         speechDetectedRef.current = false;
         resultReceivedRef.current = false;
+        speechStartedAtRef.current = null;
         
         // 自动重启
         if (shouldRestartRef.current && useAppStore.getState().isMicOn) {
@@ -373,6 +368,7 @@ export const useSpeechRecognition = () => {
     } else {
       console.log('[语音识别] 🛑 停止');
       shouldRestartRef.current = false;
+      speechStartedAtRef.current = null;
       if (recognitionRef.current) {
         recognitionRef.current.abort();
         recognitionRef.current = null;
@@ -382,6 +378,7 @@ export const useSpeechRecognition = () => {
 
     return () => {
       shouldRestartRef.current = false;
+      speechStartedAtRef.current = null;
       if (recognitionRef.current) {
         recognitionRef.current.abort();
         recognitionRef.current = null;

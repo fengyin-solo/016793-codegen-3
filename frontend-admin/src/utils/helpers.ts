@@ -61,3 +61,24 @@ export const getLanguageDisplayName = (
   const lang = languages.find(l => l.code === code);
   return lang?.nativeName || code;
 };
+
+// 格式化识别置信度。未带出时保留 null，由界面显示明确提示。
+export const formatConfidence = (confidence: number | null | undefined): string | null => {
+  if (confidence === null || confidence === undefined || !Number.isFinite(confidence)) {
+    return null;
+  }
+  return `${Math.round(Math.min(1, Math.max(0, confidence)) * 100)}%`;
+};
+
+// 格式化语音段时长。未带出时保留 null，由界面显示明确提示。
+export const formatDuration = (durationMs: number | null | undefined): string | null => {
+  if (durationMs === null || durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) {
+    return null;
+  }
+
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)} 毫秒`;
+  }
+
+  return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)} 秒`;
+};

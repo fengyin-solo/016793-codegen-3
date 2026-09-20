@@ -18,6 +18,7 @@ import { Button } from '@/components/ui';
 import { LANGUAGES } from '@/utils/constants';
 import { formatTime, getLanguageDisplayName, truncateText } from '@/utils/helpers';
 import type { SessionRecord, SessionRecordType } from '@/types';
+import { SpeechMetadata } from './SpeechMetadata';
 
 type FilterType = 'all' | SessionRecordType;
 
@@ -265,6 +266,9 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                               <p className="text-sm text-dark-100 truncate">
                                 {truncateText(record.targetText, 60)}
                               </p>
+                              <div className="mt-2">
+                                <SpeechMetadata record={record} compact />
+                              </div>
                             </div>
                             <button
                               onClick={(e) => handleDelete(record.id, e)}
@@ -322,6 +326,12 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                     <Languages className="w-4 h-4" />
                     {getLanguageDisplayName(selectedRecord.sourceLang, LANGUAGES)} → {getLanguageDisplayName(selectedRecord.targetLang, LANGUAGES)}
                   </p>
+                </div>
+
+                {/* 语音识别信息 */}
+                <div className="space-y-2">
+                  <span className="text-sm font-medium text-dark-400">语音信息</span>
+                  <SpeechMetadata record={selectedRecord} />
                 </div>
 
                 {/* 原文 */}
@@ -428,6 +438,12 @@ export const SessionHistoryCenter: React.FC<{ onClose: () => void }> = ({ onClos
                   <Languages className="w-4 h-4" />
                   {getLanguageDisplayName(selectedRecord.sourceLang, LANGUAGES)} → {getLanguageDisplayName(selectedRecord.targetLang, LANGUAGES)}
                 </p>
+              </div>
+
+              {/* 语音识别信息 */}
+              <div className="space-y-2">
+                <span className="text-sm font-medium text-dark-400">语音信息</span>
+                <SpeechMetadata record={selectedRecord} />
               </div>
 
               {/* 原文 */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { History } from 'lucide-react';
 import { ControlPanel } from '@/components/ControlPanel';
 import { SubtitleDisplay } from '@/components/SubtitleDisplay';
@@ -7,6 +7,7 @@ import { SessionHistoryCenter } from '@/components/SessionHistoryCenter';
 import { ToastContainer } from '@/components/ui';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { useAppStore } from '@/store/useAppStore';
+import { speechSynthesisService } from '@/services/speechSynthesis';
 
 const App: React.FC = () => {
   const [showHistory, setShowHistory] = useState(false);
@@ -14,6 +15,12 @@ const App: React.FC = () => {
 
   // 初始化语音识别（内部已集成TTS播报）
   useSpeechRecognition();
+
+  // 重新进入应用后恢复已保存内容，但不恢复易失的播报状态。
+  useEffect(() => {
+    speechSynthesisService.stop();
+    return () => speechSynthesisService.stop();
+  }, []);
 
   return (
     <div className="min-h-screen h-screen w-full flex flex-col p-4 md:p-6 box-border">
